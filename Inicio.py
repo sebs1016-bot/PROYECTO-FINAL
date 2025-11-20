@@ -1,20 +1,21 @@
-import os
-import time
-import json
 import streamlit as st
-from PIL import Image
-
-# ---- MQTT ----
 import paho.mqtt.client as mqtt
+import json
+import time
 
-# ---- VOZ ----
-from bokeh.models.widgets import Button
-from bokeh.models import CustomJS
-from streamlit_bokeh_events import streamlit_bokeh_events
+# -------------------------------------------------------------------
+# CONFIGURACIÓN
+# -------------------------------------------------------------------
 
-# ---------------------------- CONFIGURACIÓN PÁGINA -----------------------------
-st.set_page_config(page_title="Control de Planta", layout="centered")
+BROKER = "broker.mqttdashboard.com"
+PORT = 1883
 
+TOPIC_VOICE = "voice_ctrlprueba"    # comandos para el motor
+TOPIC_SENSOR = "Sensor/THP2"        # datos del sensor
+
+st.set_page_config(page_title="Control de Plantas", layout="centered")
+
+# Animación de fondo
 st.markdown("""
 <style>
 .stApp {
@@ -33,22 +34,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🌱 Sistema Inteligente para Plantas")
-st.subheader("Control por Voz + Sensor de Humedad y Temperatura")
+st.subheader("Control por Voz + Sensor en Tiempo Real")
 
-
-# ---------------------------- MQTT CONFIG --------------------------------------
-BROKER = "broker.mqttdashboard.com"
-PORT = 1883
-
-TOPIC_VOICE = "voice_ctrlprueba"          # donde se envía el comando del motor
-TOPIC_SENSOR = "Sensor/THP2"             # donde tu Arduino manda los datos de humedad
-
-client = mqtt.Client("streamlit_planta_mazo")
+# -------------------------------------------------------------------
+# MQTT (sensor)
+# -------------------------------------------------------------------
 
 sensor_data = {"humedad": None, "temperatura": None}
 
-
-# ---------------------------- HANDLERS MQTT ------------------------------------
 def on_message(client, userdata, message):
     global sensor_data
     try:
@@ -57,72 +50,100 @@ def on_message(client, userdata, message):
     except:
         pass
 
+client = mqtt.Client("streamlit_planta")
 client.on_message = on_message
 client.connect(BROKER, PORT)
 client.subscribe(TOPIC_SENSOR)
 client.loop_start()
 
-# ---------------------------- SECCIÓN SENSOR -----------------------------------
-st.header("📡 Datos del Sensor")
+# -------------------------------------------------------------------
+# BOTÓN PARA LEER SENSOR
+# -------------------------------------------------------------------
 
-if st.button("Actualizar Sensor"):
-    time.sleep(2)
+st.header("📡 Datos del sensor")
+
+if st.button("Actualizar datos"):
+    time.sleep(1)
     st.write(sensor_data)
 
     if sensor_data["humedad"] is not None:
-        humedad = float(sensor_data["humedad"])
-        
-        if humedad < 40:
-            st.error(f"🚨 Humedad baja ({humedad}%)")
-            st.warning("El sistema recomienda abrir el motor.")
-            st.info("Di por voz: **abrir motor**")
+        h = float(sensor_data["humedad"])
 
+        if h < 40:
+            st.error(f"🚨 Humedad baja ({h}%)")
+            st.warning("Di: 'abrir motor'")
         else:
-            st.success(f"Humedad adecuada: {humedad}%")
-    else:
-        st.warning("Aún no llegan datos del sensor.")
+            st.success(f"Humedad adecuada: {h}%")
 
+# -------------------------------------------------------------------
+# RECONOCIMIENTO DE VOZ (SIN BOKEH)
+# -------------------------------------------------------------------
 
-# ---------------------------- CONTROL POR VOZ ----------------------------------
-st.header("🎤 Control por Voz")
+st.header("🎤 Control por voz")
 
-st.write("Toca el botón y habla:")
+# Inicializa variable
+if "voz" not in st.session_state:
+    st.session_state["voz"] = ""
 
-stt_button = Button(label="🎙 Iniciar reconocimiento", width=250)
+# Botón HTML + JS
+st.markdown("""
+<button id="btnHablar" style="
+    padding: 10px 20px;
+    background-color:#1dd1a1;
+    color:black;
+    border:none;
+    border-radius:10px;
+    font-size:20px;
+    cursor:pointer;">
+    🎙 Iniciar voz
+</button>
 
-stt_button.js_on_event("button_click", CustomJS(code="""
-    var recognition = new webkitSpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
+<script>
+const btn = document.getElementById("btnHablar");
+
+btn.onclick = () => {
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
     recognition.lang = "es-ES";
+    recognition.continuous = false;
 
-    recognition.onresult = function (e) {
-        var value = e.results[0][0].transcript;
-        document.dispatchEvent(new CustomEvent("GET_TEXT", {detail: value}));
+    recognition.onresult = (event) => {
+        const texto = event.results[0][0].transcript;
+        window.parent.postMessage({type: "vozStreamlit", data: texto}, "*");
     };
+
     recognition.start();
-    """))
+};
+</script>
+""", unsafe_allow_html=True)
 
-result = streamlit_bokeh_events(
-    stt_button,
-    events="GET_TEXT",
-    key="listen",
-    debounce_time=0,
-    refresh_on_update=False,
-    override_height=75
-)
+# Recibir mensaje del navegador
+voice_input = st.experimental_get_query_params()
+st.markdown("""
+<script>
+window.addEventListener("message", (event) => {
+    if (event.data.type === "vozStreamlit") {
+        const texto = event.data.data;
+        const params = new URLSearchParams(window.location.search);
+        params.set("voz", texto);
+        window.location.search = params.toString();
+    }
+});
+</script>
+""", unsafe_allow_html=True)
 
-if result and "GET_TEXT" in result:
-    comando = result.get("GET_TEXT").strip().lower()
-    st.write("Comando detectado:", comando)
+# Procesar voz recibida
+voz = voice_input.get("voz", [""])[0]
 
-    # Publica comando
-    mensaje = json.dumps({"Act1": comando})
+if voz:
+    st.session_state["voz"] = voz
+    st.success("Comando detectado: " + voz)
+
+    # Enviar a MQTT
+    mensaje = json.dumps({"Act1": voz})
     client.publish(TOPIC_VOICE, mensaje)
 
-    # Acciones automáticas
-    if "abrir" in comando:
+    # Feedback
+    if "abrir" in voz.lower():
         st.success("🔓 Motor ABIERTO")
-
-    elif "cerrar" in comando:
+    elif "cerrar" in voz.lower():
         st.warning("🔒 Motor CERRADO")
