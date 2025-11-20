@@ -94,9 +94,6 @@ st.header("🎤 Control por voz")
 
 st.subheader("CONTROL POR VOZ")
 
-image = Image.open('voice_ctrl.jpg')
-
-st.image(image, width=200)
 
 
 
