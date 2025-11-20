@@ -2,6 +2,17 @@ import streamlit as st
 import paho.mqtt.client as mqtt
 import json
 import time
+from bokeh.models.widgets import Button
+from bokeh.models import CustomJS
+from streamlit_bokeh_events import streamlit_bokeh_events
+from PIL import Image
+import time
+import glob
+import paho.mqtt.client as paho
+import json
+from gtts import gTTS
+from googletrans import Translator
+
 
 # -------------------------------------------------------------------
 # CONFIGURACIÓN
@@ -50,7 +61,7 @@ def on_message(client, userdata, message):
     except:
         pass
 
-client = mqtt.Client("streamlit_planta")
+client = mqtt.Client("streamlit_planta_Mazo")
 client.on_message = on_message
 client.connect(BROKER, PORT)
 client.subscribe(TOPIC_SENSOR)
@@ -76,74 +87,61 @@ if st.button("Actualizar datos"):
             st.success(f"Humedad adecuada: {h}%")
 
 # -------------------------------------------------------------------
-# RECONOCIMIENTO DE VOZ (SIN BOKEH)
+# RECONOCIMIENTO DE VOZ 
 # -------------------------------------------------------------------
 
 st.header("🎤 Control por voz")
 
-# Inicializa variable
-if "voz" not in st.session_state:
-    st.session_state["voz"] = ""
+st.subheader("CONTROL POR VOZ")
 
-# Botón HTML + JS
-st.markdown("""
-<button id="btnHablar" style="
-    padding: 10px 20px;
-    background-color:#1dd1a1;
-    color:black;
-    border:none;
-    border-radius:10px;
-    font-size:20px;
-    cursor:pointer;">
-    🎙 Iniciar voz
-</button>
+image = Image.open('voice_ctrl.jpg')
 
-<script>
-const btn = document.getElementById("btnHablar");
+st.image(image, width=200)
 
-btn.onclick = () => {
-    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-    recognition.lang = "es-ES";
-    recognition.continuous = false;
 
-    recognition.onresult = (event) => {
-        const texto = event.results[0][0].transcript;
-        window.parent.postMessage({type: "vozStreamlit", data: texto}, "*");
-    };
 
-    recognition.start();
-};
-</script>
-""", unsafe_allow_html=True)
 
-# Recibir mensaje del navegador
-voice_input = st.experimental_get_query_params()
-st.markdown("""
-<script>
-window.addEventListener("message", (event) => {
-    if (event.data.type === "vozStreamlit") {
-        const texto = event.data.data;
-        const params = new URLSearchParams(window.location.search);
-        params.set("voz", texto);
-        window.location.search = params.toString();
+st.write("Toca el Botón y habla ")
+
+stt_button = Button(label=" Inicio ", width=200)
+
+stt_button.js_on_event("button_click", CustomJS(code="""
+    var recognition = new webkitSpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+ 
+    recognition.onresult = function (e) {
+        var value = "";
+        for (var i = e.resultIndex; i < e.results.length; ++i) {
+            if (e.results[i].isFinal) {
+                value += e.results[i][0].transcript;
+            }
+        }
+        if ( value != "") {
+            document.dispatchEvent(new CustomEvent("GET_TEXT", {detail: value}));
+        }
     }
-});
-</script>
-""", unsafe_allow_html=True)
+    recognition.start();
+    """))
 
-# Procesar voz recibida
-voz = voice_input.get("voz", [""])[0]
+result = streamlit_bokeh_events(
+    stt_button,
+    events="GET_TEXT",
+    key="listen",
+    refresh_on_update=False,
+    override_height=75,
+    debounce_time=0)
 
-if voz:
-    st.session_state["voz"] = voz
-    st.success("Comando detectado: " + voz)
+if result:
+    if "GET_TEXT" in result:
+        st.write(result.get("GET_TEXT"))
+        client1.on_publish = on_publish                            
+        client1.connect(broker,port)  
+        message =json.dumps({"Act1":result.get("GET_TEXT").strip()})
+        ret= client1.publish("voice_ctrl", message)
 
-    # Enviar a MQTT
-    mensaje = json.dumps({"Act1": voz})
-    client.publish(TOPIC_VOICE, mensaje)
-
-    # Feedback
-    if "abrir" in voz.lower():
-        st.success("🔓 Motor ABIERTO")
-    elif "cerrar" in voz.lower():
-        st.warning("🔒 Motor CERRADO")
+    
+    try:
+        os.mkdir("temp")
+    except:
+        pass
