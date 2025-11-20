@@ -11,7 +11,7 @@ BROKER = "broker.mqttdashboard.com"
 PORT = 1883
 
 TOPIC_VOICE = "voice_ctrlprueba"    # comandos para el motor
-TOPIC_SENSOR = "Sensor/THP2"        # datos del sensor
+TOPIC_SENSOR = "Sensor/THP2_Mazo"        # datos del sensor
 
 st.set_page_config(page_title="Control de Plantas", layout="centered")
 
