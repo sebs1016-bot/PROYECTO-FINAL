@@ -1,2 +1,7 @@
-streamlit==1.28.0
+streamlit==1.32.0
+bokeh==2.4.3
+streamlit-bokeh-events==0.1.4
 paho-mqtt==1.6.1
+Pillow
+googletrans==4.0.0rc1
+gTTS
